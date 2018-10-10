@@ -475,6 +475,16 @@ public class ImsCall implements ICall {
          */
         public void onMultipartyStateChanged(ImsCall imsCall, boolean isMultiParty) {
         }
+
+        /**
+         * Called when the call session property has changed
+         *
+         * @param imsCall ImsCall object
+         * @param int property - an integer containing masks for different properties
+         * {e.g. @see Connection#PROPERTY_RTT_AUDIO_SPEECH}
+         */
+        public void onCallSessionPropertyChanged(ImsCall imsCall, int property) {
+        }
     }
 
     // List of update operation for IMS call control
@@ -1107,6 +1117,7 @@ public class ImsCall implements ICall {
 
         synchronized(mLockObj) {
             mSession = session;
+            mIsConferenceHost = true;
 
             try {
                 session.setListener(createCallSessionListener());
@@ -1647,6 +1658,15 @@ public class ImsCall implements ICall {
     }
 
     /**
+     * Checks if the call is RTT call.
+     *
+     * @return true if the call is RTT call
+     */
+    public boolean isRttCall() {
+        return mCallProfile.mMediaProfile.isRttCall();
+    }
+
+    /**
      * Sends a user-requested RTT upgrade request.
      */
     public void sendRttModifyRequest() {
@@ -1750,6 +1770,7 @@ public class ImsCall implements ICall {
         if (mediaProfile.mVideoQuality != ImsStreamMediaProfile.VIDEO_QUALITY_NONE) {
             mediaProfile.mVideoDirection = ImsStreamMediaProfile.DIRECTION_SEND;
         }
+        mediaProfile.mRttMode = mCallProfile.mMediaProfile.mRttMode;
 
         return mediaProfile;
     }
@@ -1768,6 +1789,7 @@ public class ImsCall implements ICall {
         if (mediaProfile.mVideoQuality != ImsStreamMediaProfile.VIDEO_QUALITY_NONE) {
             mediaProfile.mVideoDirection = ImsStreamMediaProfile.DIRECTION_SEND_RECEIVE;
         }
+        mediaProfile.mRttMode = mCallProfile.mMediaProfile.mRttMode;
 
         return mediaProfile;
     }
@@ -2275,6 +2297,25 @@ public class ImsCall implements ICall {
         return;
     }
 
+    /**
+     * Sends RTT Upgrade request
+     *
+     * @param to   : expected profile
+     * @throws CallStateException
+     */
+    public void sendRttModifyRequest(ImsCallProfile to) throws ImsException {
+        logi("RTT: sendRttModifyRequest");
+
+        synchronized(mLockObj) {
+            if (mSession == null) {
+                loge("RTT: sendRttModifyRequest :: no call session");
+                throw new ImsException("No call session",
+                        ImsReasonInfo.CODE_LOCAL_CALL_TERMINATED);
+            }
+            mSession.sendRttModifyRequest(to);
+        }
+    }
+
     @VisibleForTesting
     public class ImsCallSessionListenerProxy extends ImsCallSession.Listener {
         @Override
@@ -2348,6 +2389,11 @@ public class ImsCall implements ICall {
                 logi("callSessionStartFailed :: not supported for transient conference session=" +
                         session);
                 return;
+            }
+            if (mIsConferenceHost) {
+                // If the dial request was a group calling one, this call would have
+                // been marked the conference host as part of the request.
+                mIsConferenceHost = false;
             }
 
             ImsCall.Listener listener;
@@ -3168,7 +3214,24 @@ public class ImsCall implements ICall {
                 try {
                     listener.onRttMessageReceived(ImsCall.this, rttMessage);
                 } catch (Throwable t) {
-                    loge("callSessionRttModifyResponseReceived:: ", t);
+                    loge("callSessionRttMessageReceived:: ", t);
+                }
+            }
+        }
+
+        @Override
+        public void callSessionPropertyChanged(int property) {
+            ImsCall.Listener listener;
+
+            synchronized(ImsCall.this) {
+                listener = mListener;
+            }
+
+            if (listener != null) {
+                try {
+                    listener.onCallSessionPropertyChanged(ImsCall.this, property);
+                } catch (Throwable t) {
+                    loge("callSessionPropertyChanged:: ", t);
                 }
             }
         }
